@@ -11,35 +11,33 @@ The project has attempted to keep within the simplistic spirit of the original M
 Simple example demonstrating the hooking of the MessageBoxW Windows API
 
 ```c#
+    [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    public static extern int MessageBoxW(IntPtr hWnd, String text, String caption, uint type);
 
-//PInvoke import of the MessageBoxW API from user32.dll 
-[DllImport("user32.dll", SetLastError = true, CharSet= CharSet.Unicode)]
-public static extern int MessageBoxW(int hWnd, String text, String caption, uint type);
+    //We need to declare a delegate that matches the prototype of the hooked function
+    [UnmanagedFunctionPointer(CallingConvention.StdCall,CharSet=CharSet.Unicode)]
+    delegate int MessageBoxWDelegate(IntPtr hWnd, string text, string caption, uint type);
 
-//We need to declare a delegate that matches the prototype of the hooked function
-[UnmanagedFunctionPointer(CharSet=CharSet.Unicode)]
-delegate int MessageBoxWDelegate(IntPtr hWnd, string text, string caption, uint type);
+    //A variable to store the original function so that we can call
+    //within our detoured MessageBoxW handler
+    MessageBoxWDelegate MessageBoxW_orig;
 
-//A variable to store the original function so that we can call
-//within our detoured MessageBoxW handler
-MessageBoxWDelegate MessageBoxW_orig;
+    //Our actual detour handler function
+    int MessageBoxW_Detour(IntPtr hWnd, string text, string caption, uint type) {
+        return MessageBoxW_orig(hWnd, "HOOKED: " + text, caption, type);
+    }
 
-//Our actual detour handler function
-int MessageBoxW_Detour(IntPtr hWnd, string text, string caption, uint type){
-    return MessageBoxW_orig(hWnd, "HOOKED: " + text, caption, type);
-}
+    void ChangeMessageBoxMessage() {
 
-void ChangeMessageBoxMessage(){
+        var hookEngine = new HookEngine();
+        MessageBoxW_orig = hookEngine.CreateHook("user32.dll", "MessageBoxW", new MessageBoxWDelegate(this.MessageBoxW_Detour));
+        hookEngine.EnableHooks();
 
-    hookEngine = new HookEngine();
-    MessageBoxW_orig = hookEngine.CreateHook("user32.dll", "MessageBoxW", new MessageBoxWDelegate(this.MessageBoxW_Detour));
-    hookEngine.EnableHooks();
+        //Call the PInvoke import to test our hook is in place
+        MessageBoxW(IntPtr.Zero, "Text", "Caption", 0);
 
-    //Call the PInvoke import to test our hook is in place
-    MessageBox(IntPtr.Zero, "Text", "Caption", 0);
-
-    hookEngine.DisableHooks();
-}
+        hookEngine.DisableHooks();
+    }
 ```
 
 ## TOOO
