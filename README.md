@@ -29,14 +29,14 @@ Simple example demonstrating the hooking of the MessageBoxW Windows API
 
     void ChangeMessageBoxMessage() {
 
-        var hookEngine = new HookEngine();
-        MessageBoxW_orig = hookEngine.CreateHook("user32.dll", "MessageBoxW", new MessageBoxWDelegate(this.MessageBoxW_Detour));
-        hookEngine.EnableHooks();
+		using (HookEngine engine = new HookEngine()) {
 
-        //Call the PInvoke import to test our hook is in place
-        MessageBoxW(IntPtr.Zero, "Text", "Caption", 0);
+			MessageBoxW_orig = engine.CreateHook("user32.dll", "MessageBoxW", new MessageBoxWDelegate(MessageBoxW_Detour));
+			engine.EnableHooks();
 
-        hookEngine.DisableHooks();
+			//Call the PInvoke import to test our hook is in place
+			MessageBoxW(IntPtr.Zero, "Text", "Caption", 0);
+		}
     }
 ```
 

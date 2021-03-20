@@ -4,7 +4,7 @@ using static MinHook.Trampoline;
 using static MinHook.Utils;
 
 namespace MinHook {
-    internal class Hook
+    internal sealed class Hook
     {
         public bool Enabled { get; private set; } = false;
         public bool QueueEnabled { get; private set; } = false;
@@ -60,7 +60,7 @@ namespace MinHook {
 
             VirtualProtect(patchTarget, (UIntPtr)patchSize, oldProtect, out _);
 
-            //TODO: flush instruction cache
+            FlushInstructionCache((IntPtr)(-1), patchTarget, (UIntPtr)patchSize);
             Enabled = true; 
         }
     }

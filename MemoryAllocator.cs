@@ -4,21 +4,14 @@ using System.Runtime.InteropServices;
 using static MinHook.Utils;
 
 namespace MinHook {
-    internal class MemorySlot : IDisposable {
+    internal class MemorySlot {
 
         public IntPtr Address { get; private set; }
         public int Index { get; private set; }
 
-        MemoryBlock ownerBlock;
-
-        public MemorySlot(MemoryBlock ownerBlock, IntPtr address, int index) {
-            this.ownerBlock = ownerBlock;
+        public MemorySlot(IntPtr address, int index) {
             Address = address;
             Index = index;
-        }
-
-        public void Dispose() {
-            ownerBlock.FreeSlot(this);            
         }
     }
 
@@ -60,7 +53,7 @@ namespace MinHook {
             for(int idx = 0; idx < 64; idx++) {
                 if( ((freeBitMap >> idx) & 1) == 1) {
                     freeBitMap ^= (1ul << idx);
-                    return new MemorySlot(this, (IntPtr)((long)BaseAddress + (idx * MEMORY_SLOT_SIZE)), idx);
+                    return new MemorySlot((IntPtr)((long)BaseAddress + (idx * MEMORY_SLOT_SIZE)), idx);
                 }
             }
 
@@ -82,7 +75,7 @@ namespace MinHook {
         }      
     }
 
-    internal class MemoryAllocator {
+    internal sealed class MemoryAllocator : IDisposable {
 
         // Page size for Windows
         static uint MEMORY_BLOCK_SIZE = 0x1000;
@@ -237,6 +230,13 @@ namespace MinHook {
             }
 
             return IntPtr.Zero;
+        }
+
+        public void Dispose() {
+            foreach(var block in memoryBlocks) {
+                block.Dispose();
+            }
+            GC.SuppressFinalize(this);
         }
     }
 }

@@ -1,16 +1,12 @@
 ﻿using SharpDisasm;
 using SharpDisasm.Udis86;
 using System;
-using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
-using System.Linq;
 using System.Runtime.InteropServices;
-using System.Runtime.Versioning;
-using System.Text;
 using static MinHook.Utils;
 
 namespace MinHook {
-    internal class Trampoline {
+    internal sealed class Trampoline{
 
         public interface AddressSupport {
             void SetAddress(IntPtr address);

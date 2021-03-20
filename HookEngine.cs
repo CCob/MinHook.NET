@@ -5,10 +5,11 @@ using System.Runtime.InteropServices;
 using static MinHook.Utils;
 
 namespace MinHook {
-    public class HookEngine {
+    public sealed class HookEngine : IDisposable {
 
         MemoryAllocator memoryAllocator = new MemoryAllocator();
-        Dictionary<Delegate, Hook> hooks = new Dictionary<Delegate, Hook>();
+        Dictionary<Delegate, Hook> originalHookMapping = new Dictionary<Delegate, Hook>();
+        Dictionary<Delegate, Hook> detourHookMapping = new Dictionary<Delegate, Hook>();
         List<IntPtr> suspendedThreads = new List<IntPtr>();
 
         public Func CreateHook<Func>(string dll, string function, Func detour) where Func : Delegate {
@@ -21,43 +22,47 @@ namespace MinHook {
             lock (this) {
                 var hook = new Hook(target, Marshal.GetFunctionPointerForDelegate(detour), memoryAllocator.AllocateBuffer(target));
                 Func original = (Func)Marshal.GetDelegateForFunctionPointer(hook.Original, typeof(Func));
-                hooks.Add(original, hook);
+                originalHookMapping.Add(original, hook);
+
+                //Main purpose of this is to make sure the detour delegate
+                //does not get garbage collected for the lifetime of the hook
+                detourHookMapping.Add(detour, hook);
                 return original;
             }
         }
 
         public void EnableHooks() {
-            foreach(var hook in hooks) {
+            foreach(var hook in originalHookMapping) {
                 EnableHook(hook.Key);
             }
         }
 
         public void DisableHooks() {
-            foreach (var hook in hooks) {
+            foreach (var hook in originalHookMapping) {
                 DisableHook(hook.Key);
             }
         }
 
         public void EnableHook(Delegate original) {
             lock (this) {
-                if (!hooks.ContainsKey(original)) {
+                if (!originalHookMapping.ContainsKey(original)) {
                     throw new KeyNotFoundException("Hook not found, was this delegate create with CreateHook?");
                 }
 
                 SuspendThreads();
-                hooks[original].Enable(true);
+                originalHookMapping[original].Enable(true);
                 ResumeThreads();
             }
         }
 
         public void DisableHook(Delegate original) {
             lock (this) {
-                if (!hooks.ContainsKey(original)) {
+                if (!originalHookMapping.ContainsKey(original)) {
                     throw new KeyNotFoundException("Hook not found, was this delegate create with CreateHook?");
                 }
 
                 SuspendThreads();
-                hooks[original].Enable(false);
+                originalHookMapping[original].Enable(false);
                 ResumeThreads();
             }
         }
@@ -71,7 +76,7 @@ namespace MinHook {
 
             //TODO: Currently doesn't move thread IP if any of the threads
             //are executing within the location of a hook prologue at the time.
-            //This will probably crash the program if that scenario happens
+            //This will probably crash the program if that scenario happens (rare)
 
             Process currentProc = Process.GetCurrentProcess();
 
@@ -92,6 +97,12 @@ namespace MinHook {
             }
 
             suspendedThreads.Clear();
+        }
+
+        public void Dispose() {
+            DisableHooks();
+            memoryAllocator.Dispose();
+            GC.SuppressFinalize(this);
         }
     }
 }
