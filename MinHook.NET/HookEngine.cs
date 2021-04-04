@@ -24,7 +24,7 @@ namespace MinHook {
 
         public Func CreateHook<Func>(IntPtr target, Func detour) where Func : Delegate {
 
-            if(target == IntPtr.Zero || detour != null) {
+            if(target == IntPtr.Zero || detour == null) {
                 throw new ArgumentException($"target or detour cannot be null");
             }
 
