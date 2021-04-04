@@ -15,8 +15,16 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Remove="packages\**" />
     <Compile Remove="Properties\**" />
+    <EmbeddedResource Remove="packages\**" />
     <EmbeddedResource Remove="Properties\**" />
+    <None Remove="packages\**" />
     <None Remove="Properties\**" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Remove=".gitattributes" />
+    <None Remove=".gitignore" />
+    <None Remove="README.md" />
   </ItemGroup>
 </Project>

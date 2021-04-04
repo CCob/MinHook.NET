@@ -3,7 +3,9 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 16
 VisualStudioVersion = 16.0.30503.244
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "MinHook.NET", "MinHook.NET.csproj", "{8A51250E-D357-4BDD-995A-43C0280E1560}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "MinHook.NET", "MinHook.NET\MinHook.NET.csproj", "{8A51250E-D357-4BDD-995A-43C0280E1560}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "UnitTests", "UnitTests\UnitTests.csproj", "{8F3C908E-4D7C-4BE3-A812-BBAF89EEC8E9}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -15,6 +17,10 @@ Global
 		{8A51250E-D357-4BDD-995A-43C0280E1560}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{8A51250E-D357-4BDD-995A-43C0280E1560}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{8A51250E-D357-4BDD-995A-43C0280E1560}.Release|Any CPU.Build.0 = Release|Any CPU
+		{8F3C908E-4D7C-4BE3-A812-BBAF89EEC8E9}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8F3C908E-4D7C-4BE3-A812-BBAF89EEC8E9}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8F3C908E-4D7C-4BE3-A812-BBAF89EEC8E9}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8F3C908E-4D7C-4BE3-A812-BBAF89EEC8E9}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
