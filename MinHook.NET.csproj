@@ -3,6 +3,9 @@
     <TargetFrameworks>net40;net45</TargetFrameworks>
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
     <Description>A fully managed C# port of the MinHook hooking library for native functions</Description>
+    <PackageProjectUrl>https://github.com/ccob/minhook.net</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/ccob/minhook.net</RepositoryUrl>
+    <PackageTags>hook api detour trampoline managed .net</PackageTags>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>

@@ -19,6 +19,15 @@ namespace MinHook {
             if (target == IntPtr.Zero)
                 throw new EntryPointNotFoundException($"Function {function} could not be found in DLL {dll}");
 
+            return CreateHook<Func>(target, detour); 
+        }
+
+        public Func CreateHook<Func>(IntPtr target, Func detour) where Func : Delegate {
+
+            if(target == IntPtr.Zero || detour != null) {
+                throw new ArgumentException($"target or detour cannot be null");
+            }
+
             lock (this) {
                 var hook = new Hook(target, Marshal.GetFunctionPointerForDelegate(detour), memoryAllocator.AllocateBuffer(target));
                 Func original = (Func)Marshal.GetDelegateForFunctionPointer(hook.Original, typeof(Func));
