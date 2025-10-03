@@ -1,6 +1,24 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFrameworks>net40;net45</TargetFrameworks>
+    <TargetFrameworks>
+      net45;
+      net451;
+      net452;
+      net46;
+      net461;
+      net462;
+      net47;
+      net471;
+      net472;
+      net48;
+      net481;
+      net5.0;
+      net6.0;
+      net7.0;
+      net8.0;
+      net9.0;
+      netstandard2.1;
+    </TargetFrameworks>
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
     <Description>A fully managed C# port of the MinHook hooking library for native functions</Description>
     <PackageProjectUrl>https://github.com/ccob/minhook.net</PackageProjectUrl>
