@@ -24,7 +24,7 @@
     <PackageProjectUrl>https://github.com/ccob/minhook.net</PackageProjectUrl>
     <RepositoryUrl>https://github.com/ccob/minhook.net</RepositoryUrl>
     <PackageTags>hook api detour trampoline managed .net</PackageTags>
-    <Version>1.1.1</Version>
+    <Version>1.1.2</Version>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
