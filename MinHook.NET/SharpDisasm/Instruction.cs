@@ -89,6 +89,8 @@ namespace SharpDisasm
         /// </summary>
         public byte ModRM { get { return modrm; } }
 
+        internal byte ModRMOffset { get; private set; }
+
         /// <summary>
         /// Indicates whether the instruction was successfully decoded.
         /// </summary>
@@ -239,6 +241,7 @@ namespace SharpDisasm
             this.br_near        = u.br_near;
             this.have_modrm     = u.have_modrm;
             this.modrm          = u.modrm;
+            this.ModRMOffset = u.modrm_offset;
             this.primary_opcode = u.primary_opcode;
         }
 

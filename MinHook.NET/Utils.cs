@@ -79,13 +79,14 @@ namespace MinHook {
             QUERY_INFORMATION = (0x0040),
             SET_THREAD_TOKEN = (0x0080),
             IMPERSONATE = (0x0100),
-            DIRECT_IMPERSONATION = (0x0200)
+            DIRECT_IMPERSONATION = (0x0200),
+            SYNCHRONIZE = (0x00100000)
         }
 
         [DllImport("kernel32.dll", SetLastError = true)]
         public static extern void GetSystemInfo(ref SYSTEM_INFO Info);
 
-        [DllImport("kernel32.dll")]
+        [DllImport("kernel32.dll", SetLastError = true)]
         public static extern bool VirtualProtect(IntPtr lpAddress, UIntPtr dwSize, MemoryProtection flNewProtect, out MemoryProtection oldProtect);
 
         [DllImport("kernel32.dll", SetLastError = true, ExactSpelling = true)]
@@ -110,6 +111,12 @@ namespace MinHook {
         public static extern int SuspendThread(IntPtr hThread);
 
         [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern bool GetThreadContext(IntPtr thread, IntPtr context);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern bool SetThreadContext(IntPtr thread, IntPtr context);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
         public static extern IntPtr OpenThread(ThreadAccess dwDesiredAccess, bool bInheritHandle, uint dwThreadId);
 
         [DllImport("kernel32.dll")]
@@ -122,7 +129,7 @@ namespace MinHook {
         [DllImport("kernel32.dll", SetLastError = true)]
         public static extern uint ResumeThread(IntPtr hThread);
 
-        [DllImport("kernel32.dll")]
+        [DllImport("kernel32.dll", SetLastError = true)]
         public static extern bool FlushInstructionCache(IntPtr hProcess, IntPtr lpBaseAddress, UIntPtr dwSize);
     }
 }

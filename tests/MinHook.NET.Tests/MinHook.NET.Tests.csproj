@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <IsTestProject>true</IsTestProject>
+    <GenerateTestingPlatformEntryPoint>false</GenerateTestingPlatformEntryPoint>
+    <NativeHelperArchitecture Condition="'$(PlatformTarget)' == 'x86'">x86</NativeHelperArchitecture>
+    <NativeHelperArchitecture Condition="'$(NativeHelperArchitecture)' == ''">x64</NativeHelperArchitecture>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include="../../artifacts/native/$(NativeHelperArchitecture)/Release/MinHook.Threads.dll"
+          Link="MinHook.Threads.dll" CopyToOutputDirectory="PreserveNewest" />
+    <PackageReference Include="xunit.v3" Version="3.2.2" />
+    <ProjectReference Include="../../MinHook.NET/MinHook.NET.csproj" />
+  </ItemGroup>
+  <Target Name="ValidateNativeThreadHelper" BeforeTargets="PrepareForBuild">
+    <Error Condition="!Exists('$(MSBuildProjectDirectory)/../../artifacts/native/$(NativeHelperArchitecture)/Release/MinHook.Threads.dll')"
+           Text="Build the native thread helper first with scripts/build-native.ps1." />
+  </Target>
+</Project>

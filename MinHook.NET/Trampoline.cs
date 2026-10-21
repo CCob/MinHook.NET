@@ -6,7 +6,14 @@ using System.Runtime.InteropServices;
 using static MinHook.Utils;
 
 namespace MinHook {
-    internal sealed class Trampoline{
+    internal sealed unsafe class Trampoline{
+
+        internal static readonly int RelativeJumpSize = sizeof(JMPCALL_REL);
+        internal static readonly int ShortJumpSize = sizeof(JMP_REL_SHORT);
+        internal static readonly int AbsoluteJumpSize = sizeof(JMP_ABS);
+        internal static readonly int AbsoluteCallSize = sizeof(CALL_ABS);
+        internal static readonly int RelativeConditionalJumpSize = sizeof(JCC_REL);
+        internal static readonly int AbsoluteConditionalJumpSize = sizeof(JCC_ABS);
 
         public interface AddressSupport {
             void SetAddress(IntPtr address);
@@ -150,8 +157,12 @@ namespace MinHook {
         public byte[] OldInstructionBoundaries { get; private set; } = new byte[64];
         public byte[] NewInstructionBoundaries { get; private set; } = new byte[64];
         public byte[] Backup { get; private set; } = new byte[8];
+        ulong absoluteCalls;
+        ulong absoluteConditionalJumps;
 
-        public int TrampolineMaxSize = 32;
+        internal const int IndirectBranchInstructionSize = sizeof(ushort) + sizeof(int);
+
+        public readonly int TrampolineMaxSize = MemoryBlock.MemorySlotSize - (IntPtr.Size == 8 ? AbsoluteJumpSize : 0);
 
         static int PAGE_EXECUTE = 0x10;
         static int PAGE_EXECUTE_READ = 0x20;
@@ -162,7 +173,7 @@ namespace MinHook {
         [SuppressMessage("CodeQuality", "IDE0052:Remove unread private members", Justification = "MemorySlot has unmanged resources that we need to hold onto to prevent GC")]
         readonly MemorySlot memorySlot;
 
-        public Trampoline(IntPtr target, IntPtr detour, MemorySlot memorySlot ) {
+        public unsafe Trampoline(IntPtr target, IntPtr detour, MemorySlot memorySlot ) {
 
             Target = target;
             Detour = detour;
@@ -172,146 +183,114 @@ namespace MinHook {
             uint oldPos = 0;
             uint newPos = 0;
             IntPtr jmpDest = IntPtr.Zero;
-            IntPtr instBuf = Marshal.AllocHGlobal(16);
+            byte* instructionBuffer = stackalloc byte[16];
+            IntPtr instBuf = (IntPtr)instructionBuffer;
             bool finished = false;
             bool is64 = IntPtr.Size == 8;
-            object jmp;
-            object call;
-            object jcc;
-           
-            if (is64) {
-                call = new CALL_ABS(IntPtr.Zero);
-                jmp = new JMP_ABS(IntPtr.Zero);
-                jcc = new JCC_ABS(IntPtr.Zero);
-            } else {
-                call = new JMPCALL_REL(0xE8);
-                jmp = new JMPCALL_REL(0xE9);
-                jcc = new JCC_REL(0);
-            }            
 
             do {
-                object srcObj = null;
                 uint copySize;
                 IntPtr copySrc;
                 IntPtr oldInst = (IntPtr)((long)Target + oldPos);
                 IntPtr newInst = (IntPtr)((long)Tramp + newPos);
                
-                Disassembler disasm = new Disassembler(oldInst, 16, is64 ? ArchitectureMode.x86_64 : ArchitectureMode.x86_32, 0, true);
-                disasm.Disassemble();
-                
-                Instruction inst = disasm.NextInstruction();
+                Instruction inst;
+                using (Disassembler disasm = new Disassembler(oldInst, 15, is64 ? ArchitectureMode.x86_64 : ArchitectureMode.x86_32)) {
+                    inst = disasm.NextInstruction();
+                }
 
+                if (inst == null) throw new NotSupportedException("Unable to decode target instruction");
                 if (inst.Error)
                     throw new Exception(inst.ErrorMessage);
 
                 copySrc = oldInst;
                 copySize = (uint)inst.Length;
+                int opcodeOffset = 0;
+                byte opcode = Marshal.ReadByte(oldInst);
+                while (IsPrefix(opcode, is64) && opcodeOffset + 1 < inst.Length) {
+                    opcode = Marshal.ReadByte(oldInst, ++opcodeOffset);
+                }
 
-                if(oldPos >= Marshal.SizeOf(typeof(JMPCALL_REL))) {
+                if(oldPos >= RelativeJumpSize) {
 
-                    if (is64) {
-                        ((AddressSupport)jmp).SetAddress(oldInst);
-                    } else {
-                        ((OperandSupport)jmp).SetOperand((uint)((uint)oldInst - ((uint)newInst + Marshal.SizeOf(jmp))));
-                    }
-
-                    srcObj = jmp;
-                    copySize = (uint)Marshal.SizeOf(jmp);
+                    copySize = WriteJump(instBuf, newInst, oldInst, is64);
+                    copySrc = instBuf;
                     finished = true;
 
-                }else if (is64 && inst.HasModRM && ((inst.ModRM & 0xC7) == 0x5)) {
+                }else if (is64 && inst.adr_mode == 64 && inst.HasModRM && ((inst.ModRM & 0xC7) == 0x5)) {
 
                     byte modRMReg = (byte)((inst.ModRM & 0x3f) >> 3);                    
                     copySrc = instBuf;
-                    CopyMemory(instBuf, oldInst, (int)copySize);
-
-                    //TODO: figure out how to calculate imm length with udisasm engine
-                    uint immLen = 0;
-                    IntPtr relAddr = (IntPtr)((long)instBuf + inst.Length - immLen - 4);
-                    uint updatedRel = (uint)((ulong)oldInst + (ulong)inst.Length + inst.Operands[0].LvalUDWord - ((ulong)newInst + (ulong)inst.Length));
-                    Marshal.WriteInt32(relAddr, (int)updatedRel);
+                    NativeMemory.Copy(instBuf, oldInst, (int)copySize);
+                    int displacementOffset = inst.ModRMOffset + 1;
+                    int oldDisplacement = Marshal.ReadInt32(oldInst, displacementOffset);
+                    int displacement = checked((int)((long)oldInst + inst.Length + oldDisplacement - ((long)newInst + inst.Length)));
+                    Marshal.WriteInt32(instBuf, displacementOffset, displacement);
                     
                     // Complete function if JMP (FF /4)
-                    if (inst.Bytes[0] == 0xFF & modRMReg == 4)
+                    if (opcode == 0xFF && modRMReg == 4)
                         finished = true;
               
-                } else if(inst.Mnemonic == ud_mnemonic_code.UD_Icall) {
+                } else if(opcode == 0xE8) {
 
                     IntPtr dest = (IntPtr)((long)oldInst + inst.Length + inst.Operands[0].LvalSDWord);
 
-                    if (is64) {
-                        ((AddressSupport)call).SetAddress(dest);
-                    } else {
-                        ((OperandSupport)call).SetOperand((uint)dest - (uint)(newInst + Marshal.SizeOf(call)));
-                    }
+                    if (inst.Operands[0].Size != 32) throw new NotSupportedException("Only rel32 calls are supported");
+                    copySize = WriteCall(instBuf, newInst, dest, is64);
+                    if (is64) absoluteCalls |= 1UL << (int)InstructionBoundaries;
+                    copySrc = instBuf;
 
-                    srcObj = call;
-                    copySize = (uint)Marshal.SizeOf(call);
-
-                }else if( (inst.Bytes[0] & 0xFD) == 0xE9) {
+                }else if( (opcode & 0xFD) == 0xE9) {
 
                     IntPtr dest = oldInst + inst.Length;
 
-                    if ((inst.Bytes[0] == 0xE9)) { //short JMP
-                        dest = IntPtr.Add(dest, inst.Operands[0].LvalByte);
+                    if (opcode == 0xEB) {
+                        dest = IntPtr.Add(dest, inst.Operands[0].LvalSByte);
                     } else {
+                        if (inst.Operands[0].Size != 32) throw new NotSupportedException("Only rel32 near jumps are supported");
                         dest = IntPtr.Add(dest, inst.Operands[0].LvalSDWord);
                     }
 
-                    if((long)Target <= (long)dest && (long)dest < ( (long)Target + Marshal.SizeOf(typeof(JMPCALL_REL)))) {
+                    if((long)Target <= (long)dest && (long)dest < ((long)Target + RelativeJumpSize)) {
                         if((long)jmpDest < (long)dest) {
                             jmpDest = dest;
                         }
                     } else {
 
-                        if (is64) {
-                            ((AddressSupport)jmp).SetAddress(dest);
-                        } else {
-                            ((OperandSupport)jmp).SetOperand((uint)((uint)dest - ((uint)newInst + Marshal.SizeOf(jmp))));
-                        }
-
-                        srcObj = jmp;
-                        copySize = (uint)Marshal.SizeOf(jmp);
+                        copySize = WriteJump(instBuf, newInst, dest, is64);
+                        copySrc = instBuf;
                         finished = ((long)oldInst >= (long)jmpDest);
                     }
 
 
-                }else if(inst.Length >= 2 && 
-                            ( (inst.Bytes[0] & 0xF0) == 0x70) || 
-                            ( (inst.Bytes[0] & 0xFC) == 0xE0) ||
-                            ( inst.Bytes[0] == 0xF0 && (inst.Bytes[1] & 0xF0) == 0x80) ){
+                }else if(inst.Length >= 2 && (
+                            ((opcode & 0xF0) == 0x70) ||
+                            ((opcode & 0xFC) == 0xE0) ||
+                            (opcode == 0x0F && (Marshal.ReadByte(oldInst, opcodeOffset + 1) & 0xF0) == 0x80))) {
                     //Jcc Handler
 
                     IntPtr dest = oldInst + inst.Length;
 
-                    if( (inst.Bytes[0] & 0xF0) == 0x70 ||
-                        (inst.Bytes[0] & 0xFC) == 0xE0) {
+                    if( (opcode & 0xF0) == 0x70 || (opcode & 0xFC) == 0xE0) {
 
-                        dest = IntPtr.Add(dest, inst.Operands[0].LvalByte);
+                        dest = IntPtr.Add(dest, inst.Operands[0].LvalSByte);
                     } else {
+                        if (inst.Operands[0].Size != 32) throw new NotSupportedException("Only rel32 near conditional jumps are supported");
                         dest = IntPtr.Add(dest, (int)inst.Operands[0].LvalUDWord);
                     }
 
-                    if((long)Target <= (long)dest && (long)dest < ((long)Target + Marshal.SizeOf(typeof(JMPCALL_REL)))){
+                    if((long)Target <= (long)dest && (long)dest < ((long)Target + RelativeJumpSize)){
                         if((long)jmpDest < (long)dest) {
                             jmpDest = dest;
                         }
-                    }else if( (inst.Bytes[0] & 0xFC) == 0xE0) {
+                    }else if( (opcode & 0xFC) == 0xE0) {
                         throw new Exception("LOOPx/Jxx to the outside not supported");
                     } else {
 
-                        byte cond = (byte)((inst.Bytes[0] != 0x0F ? inst.Bytes[0] : inst.Bytes[1]) & 0xF0);
-
-                        if (is64) {
-                            ((OpcodeSupport)jcc).SetOpcode((byte)(0x71 ^ cond));
-                            ((AddressSupport)jcc).SetAddress(dest);
-                        } else {
-                            ((OpcodeSupport)jcc).SetOpcode((byte)(0x80 ^ cond));
-                            ((OperandSupport)jcc).SetOperand((uint)((uint)dest - ((uint)newInst + Marshal.SizeOf(jcc))));
-                        }
-
-                        srcObj = jcc;
-                        copySize = (uint)Marshal.SizeOf(jcc);
+                        byte cond = (byte)((opcode != 0x0F ? opcode : Marshal.ReadByte(oldInst, opcodeOffset + 1)) & 0x0F);
+                        copySize = WriteConditionalJump(instBuf, newInst, dest, cond, is64);
+                        if (is64) absoluteConditionalJumps |= 1UL << (int)InstructionBoundaries;
+                        copySrc = instBuf;
                     }
 
                 }else if(inst.Mnemonic == ud_mnemonic_code.UD_Iret || inst.Mnemonic == ud_mnemonic_code.UD_Iretf) {
@@ -327,7 +306,7 @@ namespace MinHook {
                     throw new Exception("Trampoline function too big");
                 }
 
-                if(InstructionBoundaries > OldInstructionBoundaries.Length) {
+                if(InstructionBoundaries >= OldInstructionBoundaries.Length) {
                     throw new Exception("Trampoline has too many instructions");
                 }
 
@@ -335,14 +314,7 @@ namespace MinHook {
                 NewInstructionBoundaries[InstructionBoundaries] = (byte)newPos;
                 InstructionBoundaries++;
 
-                if (srcObj != null) { 
-                    IntPtr data = Marshal.AllocHGlobal((int)copySize);
-                    Marshal.StructureToPtr(srcObj, data, false);
-                    CopyMemory((IntPtr)((long)Tramp + newPos), data, (int)copySize);
-                    Marshal.FreeHGlobal(data);
-                } else {
-                    CopyMemory((IntPtr)((long)Tramp + newPos), copySrc, (int)copySize);
-                }
+                NativeMemory.Copy((IntPtr)((long)Tramp + newPos), copySrc, (int)copySize);
                
                 newPos += copySize;
                 oldPos += (uint)inst.Length;            
@@ -350,21 +322,21 @@ namespace MinHook {
             } while (!finished);
 
 
-            if (oldPos < Marshal.SizeOf(typeof(JMPCALL_REL))
+            if (oldPos < RelativeJumpSize
 
-                && IsCodePadding((IntPtr)((long)Target + oldPos), (int)(Marshal.SizeOf(typeof(JMPCALL_REL)) - oldPos))) {
+                && !IsCodePadding((IntPtr)((long)Target + oldPos), (int)(RelativeJumpSize - oldPos))) {
 
-                if (oldPos < Marshal.SizeOf(typeof(JMP_REL_SHORT))
-                    && IsCodePadding((IntPtr)((long)Target + oldPos), (int)(Marshal.SizeOf(typeof(JMP_REL_SHORT)) - oldPos))) {
+                if (oldPos < ShortJumpSize
+                    && !IsCodePadding((IntPtr)((long)Target + oldPos), (int)(ShortJumpSize - oldPos))) {
 
                     throw new Exception("Not enough space for patch");
                 }
 
-                if (!IsExecutableAddress( (IntPtr) ( (long)Target - Marshal.SizeOf(typeof(JMPCALL_REL))))) {
+                if (!IsExecutableAddress((IntPtr)((long)Target - RelativeJumpSize))) {
                     throw new Exception("Not enought space for patch");
                 }
 
-                if (!IsCodePadding((IntPtr)((long)Target - Marshal.SizeOf(typeof(JMPCALL_REL))), Marshal.SizeOf(typeof(JMPCALL_REL)))) {
+                if (!IsCodePadding((IntPtr)((long)Target - RelativeJumpSize), RelativeJumpSize)) {
                     throw new Exception("Not enought space for patch");
                 }
 
@@ -372,13 +344,8 @@ namespace MinHook {
             }
 
             if (is64) {
-                ((AddressSupport)jmp).SetAddress(Detour);
                 Relay = (IntPtr)((long)Tramp + newPos);
-
-                IntPtr data = Marshal.AllocHGlobal((int)Marshal.SizeOf(jmp));
-                Marshal.StructureToPtr(jmp, data, false);
-                CopyMemory(Relay, data, Marshal.SizeOf(jmp));
-                Marshal.FreeHGlobal(data);              
+                WriteJump(Relay, Relay, Detour, true);
             }
 
             BackupPrologue();
@@ -388,11 +355,37 @@ namespace MinHook {
             
             if (PatchAbove) {
 
-                Marshal.Copy((IntPtr)((long)Target - Marshal.SizeOf(typeof(JMPCALL_REL))), 
-                    Backup, 0, Marshal.SizeOf(typeof(JMPCALL_REL)) + Marshal.SizeOf(typeof(JMP_REL_SHORT)));
+                Marshal.Copy((IntPtr)((long)Target - RelativeJumpSize), Backup, 0, RelativeJumpSize + ShortJumpSize);
 
             } else {
-                Marshal.Copy(Target, Backup, 0, Marshal.SizeOf(typeof(JMPCALL_REL)));
+                Marshal.Copy(Target, Backup, 0, RelativeJumpSize);
+            }
+        }
+
+        // Boundary mapping follows MinHook v1.3.4 FindOldIP/FindNewIP, with explicit
+        // continuations for the extra instructions emitted by x64 CALL/Jcc expansion.
+        internal bool TryMapInstructionPointer(ulong ip, bool enable, bool targetIsPatched, out ulong mapped) {
+            NativeHookPlan plan = default;
+            WriteNativePlan(ref plan, targetIsPatched);
+            return NativeThreadMethods.mh_map_ip(ref plan, ip, enable ? 1 : 0, out mapped) != 0;
+        }
+
+        internal void WriteNativePlan(ref NativeHookPlan plan, bool enabled) {
+            plan.Target = Target;
+            plan.Trampoline = Tramp;
+            plan.Relay = Relay;
+            plan.Destination = IntPtr.Size == 8 ? Relay : Detour;
+            plan.AbsoluteCalls = absoluteCalls;
+            plan.AbsoluteConditionalJumps = absoluteConditionalJumps;
+            plan.BoundaryCount = InstructionBoundaries;
+            plan.PatchAbove = PatchAbove ? 1U : 0U;
+            plan.Enabled = enabled ? 1U : 0U;
+            fixed (NativeHookPlan* value = &plan) {
+                for (int i = 0; i < 64; i++) {
+                    value->OldIps[i] = OldInstructionBoundaries[i];
+                    value->NewIps[i] = NewInstructionBoundaries[i];
+                }
+                for (int i = 0; i < 8; i++) value->Backup[i] = Backup[i];
             }
         }
 
@@ -403,20 +396,64 @@ namespace MinHook {
         }
 
         bool IsCodePadding(IntPtr codePtr, int len) {
-
-            var code = new byte[len];
-            Marshal.Copy(codePtr, code, 0, len);
-
-            if(code[0] != 0x00 && code[0] != 0x90 && code[0] != 0xCC) {
+            byte first = Marshal.ReadByte(codePtr);
+            if(first != 0x00 && first != 0x90 && first != 0xCC) {
                 return false;
             }
 
-            for(int idx = 1; idx < code.Length; ++idx) {
-                if (code[idx] != code[0])
+            for(int idx = 1; idx < len; ++idx) {
+                if (Marshal.ReadByte(codePtr, idx) != first)
                     return false;
             }
 
             return true;
+        }
+
+        static uint WriteJump(IntPtr buffer, IntPtr address, IntPtr destination, bool is64) {
+            if (is64) {
+                var instruction = new JMP_ABS(destination);
+                NativeMemory.Write(buffer, ref instruction);
+                return (uint)AbsoluteJumpSize;
+            } else {
+                var instruction = new JMPCALL_REL(0xE9);
+                instruction.SetOperand(unchecked((uint)((long)destination - ((long)address + RelativeJumpSize))));
+                NativeMemory.Write(buffer, ref instruction);
+                return (uint)RelativeJumpSize;
+            }
+        }
+
+        static bool IsPrefix(byte opcode, bool is64) {
+            return opcode == 0xF0 || opcode == 0xF2 || opcode == 0xF3 ||
+                opcode == 0x26 || opcode == 0x2E || opcode == 0x36 || opcode == 0x3E ||
+                opcode == 0x64 || opcode == 0x65 || opcode == 0x66 || opcode == 0x67 ||
+                (is64 && (opcode & 0xF0) == 0x40);
+        }
+
+        static uint WriteCall(IntPtr buffer, IntPtr address, IntPtr destination, bool is64) {
+            if (is64) {
+                var instruction = new CALL_ABS(destination);
+                NativeMemory.Write(buffer, ref instruction);
+                return (uint)AbsoluteCallSize;
+            } else {
+                var instruction = new JMPCALL_REL(0xE8);
+                instruction.SetOperand(unchecked((uint)((long)destination - ((long)address + RelativeJumpSize))));
+                NativeMemory.Write(buffer, ref instruction);
+                return (uint)RelativeJumpSize;
+            }
+        }
+
+        static uint WriteConditionalJump(IntPtr buffer, IntPtr address, IntPtr destination, byte condition, bool is64) {
+            if (is64) {
+                var instruction = new JCC_ABS(destination);
+                instruction.SetOpcode((byte)(0x71 ^ condition));
+                NativeMemory.Write(buffer, ref instruction);
+                return (uint)AbsoluteConditionalJumpSize;
+            } else {
+                var instruction = new JCC_REL(unchecked((uint)((long)destination - ((long)address + RelativeConditionalJumpSize))));
+                instruction.SetOpcode((byte)(0x80 | condition));
+                NativeMemory.Write(buffer, ref instruction);
+                return (uint)RelativeConditionalJumpSize;
+            }
         }
     }
 }

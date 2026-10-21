@@ -20,7 +20,7 @@
       netstandard2.1;
     </TargetFrameworks>
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
-    <Description>A fully managed C# port of the MinHook hooking library for native functions</Description>
+    <Description>A C# MinHook port with native Windows thread-context and patch transactions</Description>
     <PackageProjectUrl>https://github.com/ccob/minhook.net</PackageProjectUrl>
     <RepositoryUrl>https://github.com/ccob/minhook.net</RepositoryUrl>
     <PackageTags>hook api detour trampoline managed .net</PackageTags>
@@ -44,5 +44,9 @@
     <None Remove=".gitattributes" />
     <None Remove=".gitignore" />
     <None Remove="README.md" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="../artifacts/native/x86/Release/MinHook.Threads.dll" Pack="true" PackagePath="runtimes/win-x86/native/" />
+    <None Include="../artifacts/native/x64/Release/MinHook.Threads.dll" Pack="true" PackagePath="runtimes/win-x64/native/" />
   </ItemGroup>
 </Project>

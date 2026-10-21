@@ -18,8 +18,8 @@ namespace MinHook {
     internal class MemoryBlock : IDisposable {
 
         // Page size for Windows
-        static readonly uint MEMORY_BLOCK_SIZE = 0x1000;
-        static readonly uint MEMORY_SLOT_SIZE = 64;
+        internal const int MemoryBlockSize = 0x1000;
+        internal const int MemorySlotSize = 64;
 
         public IntPtr BaseAddress { get; private set; }
         ulong freeBitMap;
@@ -35,7 +35,10 @@ namespace MinHook {
 
         protected void Dispose(bool disposing) {
             if(BaseAddress != IntPtr.Zero) {                
-                VirtualFree(BaseAddress, (int)MEMORY_BLOCK_SIZE, FreeType.Release);
+                if (!VirtualFree(BaseAddress, 0, FreeType.Release)) {
+                    if (disposing) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+                    return;
+                }
                 BaseAddress = IntPtr.Zero;
             }
         }
@@ -46,6 +49,8 @@ namespace MinHook {
 
         public MemorySlot AllocateSlot() {
 
+            if (BaseAddress == IntPtr.Zero) throw new ObjectDisposedException(nameof(MemoryBlock));
+
             if (IsFull()) {
                 throw new OutOfMemoryException("No free slots available");
             }
@@ -53,7 +58,7 @@ namespace MinHook {
             for(int idx = 0; idx < 64; idx++) {
                 if( ((freeBitMap >> idx) & 1) == 1) {
                     freeBitMap ^= (1ul << idx);
-                    return new MemorySlot((IntPtr)((long)BaseAddress + (idx * MEMORY_SLOT_SIZE)), idx);
+                    return new MemorySlot((IntPtr)((long)BaseAddress + (idx * MemorySlotSize)), idx);
                 }
             }
 
@@ -62,7 +67,7 @@ namespace MinHook {
 
         public void FreeSlot(MemorySlot memorySlot) {
 
-            if((ulong)memorySlot.Address < (ulong)BaseAddress || (ulong)memorySlot.Address >= (ulong)BaseAddress + MEMORY_BLOCK_SIZE) {
+            if((ulong)memorySlot.Address < (ulong)BaseAddress || (ulong)memorySlot.Address >= (ulong)BaseAddress + MemoryBlockSize) {
                 throw new ArgumentException("memorySlot does not belong to this block");
             }
 
@@ -83,15 +88,29 @@ namespace MinHook {
         // Max range for seeking a memory block. (= 1024MB)
         static uint MAX_MEMORY_RANGE = 0x40000000;
 
-        static List<MemoryBlock> memoryBlocks = new List<MemoryBlock>();
+        readonly List<MemoryBlock> memoryBlocks = new List<MemoryBlock>();
+        bool disposed;
 
         public MemoryAllocator() {
 
         }
 
         public MemorySlot AllocateBuffer(IntPtr origin) {
+            if (disposed) throw new ObjectDisposedException(nameof(MemoryAllocator));
             MemoryBlock block = GetMemoryBlock(origin);               
             return block.AllocateSlot();
+        }
+
+        internal void FreeBuffer(MemorySlot slot) {
+            if (disposed) throw new ObjectDisposedException(nameof(MemoryAllocator));
+            foreach (MemoryBlock block in memoryBlocks) {
+                if ((ulong)slot.Address >= (ulong)block.BaseAddress &&
+                    (ulong)slot.Address < (ulong)block.BaseAddress + MemoryBlock.MemoryBlockSize) {
+                    block.FreeSlot(slot);
+                    return;
+                }
+            }
+            throw new ArgumentException("Slot does not belong to this allocator", nameof(slot));
         }
 
         MemoryBlock GetMemoryBlock(IntPtr origin) {
@@ -183,9 +202,11 @@ namespace MinHook {
             return result;
         }
 
-        IntPtr FindPrevFreeRegion(IntPtr address, IntPtr minAddress, uint allocationGranularity) {
+        internal IntPtr FindPrevFreeRegion(IntPtr address, IntPtr minAddress, uint allocationGranularity) {
 
-            IntPtr tryAddr = (IntPtr) ((ulong)address - ( ((ulong)address % allocationGranularity) - allocationGranularity));
+            ulong alignedAddress = (ulong)address - (ulong)address % allocationGranularity;
+            if (alignedAddress < allocationGranularity) return IntPtr.Zero;
+            IntPtr tryAddr = (IntPtr)(alignedAddress - allocationGranularity);
             
             while((ulong)tryAddr >= (ulong)minAddress) {
 
@@ -206,9 +227,11 @@ namespace MinHook {
             return IntPtr.Zero;
         }
 
-        IntPtr FindNextFreeRegion(IntPtr address, IntPtr maxAddress, uint allocationGranularity) {
+        internal IntPtr FindNextFreeRegion(IntPtr address, IntPtr maxAddress, uint allocationGranularity) {
 
-            IntPtr tryAddr = (IntPtr)((ulong)address - (((ulong)address % allocationGranularity) + allocationGranularity));
+            ulong alignedAddress = (ulong)address - (ulong)address % allocationGranularity;
+            if (alignedAddress > ulong.MaxValue - allocationGranularity) return IntPtr.Zero;
+            IntPtr tryAddr = (IntPtr)(alignedAddress + allocationGranularity);
 
             while ((ulong)tryAddr <= (ulong)maxAddress) {
 
@@ -233,9 +256,12 @@ namespace MinHook {
         }
 
         public void Dispose() {
+            if (disposed) return;
             foreach(var block in memoryBlocks) {
                 block.Dispose();
             }
+            memoryBlocks.Clear();
+            disposed = true;
             GC.SuppressFinalize(this);
         }
     }

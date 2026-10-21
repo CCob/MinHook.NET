@@ -1,0 +1,8 @@
+<Project>
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
+    <BaseOutputPath Condition="'$(PlatformTarget)' != ''">bin/$(PlatformTarget)/</BaseOutputPath>
+    <BaseIntermediateOutputPath Condition="'$(PlatformTarget)' != ''">obj/$(PlatformTarget)/</BaseIntermediateOutputPath>
+    <DefaultItemExcludes>$(DefaultItemExcludes);bin/**;obj/**</DefaultItemExcludes>
+  </PropertyGroup>
+</Project>
